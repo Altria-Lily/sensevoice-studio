@@ -1,14 +1,20 @@
 // Direct edge resizing does not rebuild the reader or touch media playback.
-// The video retains its natural 16:9 frame; the text card follows its height.
+// The text follows the dual-column video card; focus uses the video's own ratio.
 const WORKSPACE_MIN_WIDTH = 960;
+const FOCUSED_MIN_WIDTH = 640;
 const WORKSPACE_MAX_WIDTH = 1920;
 const clampWorkspace = (value, min, max) => Math.max(min, Math.min(max, value));
 
-function chooseWorkspaceWidth({ available, viewportHeight, workspaceTop, chromeHeight, video, focused, manual }) {
+function chooseWorkspaceWidth({ available, viewportHeight, workspaceTop, chromeHeight, video, focused, manual, aspect = 16 / 9 }) {
   const maximum = Math.min(WORKSPACE_MAX_WIDTH, available);
-  const minimum = Math.min(WORKSPACE_MIN_WIDTH, maximum);
+  const minimum = Math.min(focused ? FOCUSED_MIN_WIDTH : WORKSPACE_MIN_WIDTH, maximum);
   if (Number.isFinite(manual)) return Math.round(clampWorkspace(manual, minimum, maximum));
-  if (focused) return Math.round(maximum);
+  if (focused) {
+    const ratio = Number.isFinite(aspect) && aspect > 0 ? aspect : 16 / 9;
+    // Size the frame to the picture, not a full-width box with a fixed height.
+    // Keep enough room for the reader and controls when a video is portrait.
+    return Math.round(clampWorkspace(Math.min(viewportHeight * 0.72, 920) * ratio + 2, minimum, maximum));
+  }
   if (!video) return Math.round(Math.min(1240, maximum));
   const targetHeight = clampWorkspace(viewportHeight - workspaceTop - 24, 530, 1000);
   const videoWidth = Math.max(1, targetHeight - chromeHeight) * 16 / 9;
@@ -22,6 +28,8 @@ class WorkspaceLayout {
     this.edges = [...shell.querySelectorAll('[data-resize-edge]')];
     this.active = false;
     this.manualWidth = null;
+    this.focusWidth = null;
+    this.focused = false;
     this.frame = null;
     this.drag = null;
     this.observer = new ResizeObserver(() => this.schedule());
@@ -48,7 +56,23 @@ class WorkspaceLayout {
     });
   }
 
-  get preference() { return this.drag ? this.drag.originalWidth : this.manualWidth; }
+  get preference() { return this.drag && !this.focused ? this.drag.originalWidth : this.manualWidth; }
+
+  get currentWidth() { return this.focused ? this.focusWidth : this.manualWidth; }
+  set currentWidth(value) {
+    if (this.focused) this.focusWidth = value;
+    else this.manualWidth = value;
+  }
+
+  setFocused(focused) {
+    if (this.focused !== focused) {
+      this.finishDrag(true);
+      this.focused = focused;
+      // Each visit starts fitted to the video; the dual-column preference stays intact.
+      this.focusWidth = null;
+    }
+    this.schedule();
+  }
 
   restore(value) {
     this.manualWidth = typeof value === 'number' && Number.isFinite(value)
@@ -59,13 +83,16 @@ class WorkspaceLayout {
   setActive(active) {
     this.finishDrag(true);
     this.active = active;
-    if (active) this.schedule();
+    if (active) {
+      this.focusWidth = null;
+      this.schedule();
+    }
   }
 
   bounds() {
     const available = Math.max(1, document.documentElement.clientWidth - (innerWidth <= 760 ? 28 : 48));
     const maximum = Math.min(WORKSPACE_MAX_WIDTH, available);
-    return { available, maximum, minimum: Math.min(WORKSPACE_MIN_WIDTH, maximum), stacked: innerWidth <= 980 };
+    return { available, maximum, minimum: Math.min(this.focused ? FOCUSED_MIN_WIDTH : WORKSPACE_MIN_WIDTH, maximum), stacked: innerWidth <= 980 };
   }
 
   schedule() {
@@ -76,13 +103,16 @@ class WorkspaceLayout {
   layout() {
     if (!this.active || document.fullscreenElement) return;
     const bounds = this.bounds();
-    const video = Boolean(this.mediaMount.querySelector('video'));
-    const focused = this.grid.classList.contains('video-focus') && video;
+    const media = this.mediaMount.querySelector('video');
+    const video = Boolean(media);
+    const focused = this.focused && video;
+    const aspect = media?.videoWidth > 0 && media?.videoHeight > 0 ? media.videoWidth / media.videoHeight : 16 / 9;
+    this.grid.style.setProperty('--focus-video-aspect', String(aspect));
     const chromeHeight = ['.media-heading', '.playback-settings', '.now-playing']
       .reduce((height, selector) => height + this.mediaCard.querySelector(selector).getBoundingClientRect().height, 2);
     const width = chooseWorkspaceWidth({ available: bounds.available, viewportHeight: innerHeight,
       workspaceTop: this.shell.getBoundingClientRect().top + scrollY, chromeHeight, video, focused,
-      manual: bounds.stacked ? bounds.available : this.manualWidth });
+      manual: bounds.stacked ? bounds.available : this.currentWidth, aspect });
     const property = width + 'px';
     const widthChanged = document.documentElement.style.getPropertyValue('--result-page-width') !== property;
     if (widthChanged) document.documentElement.style.setProperty('--result-page-width', property);
@@ -92,9 +122,9 @@ class WorkspaceLayout {
       const height = Math.round(this.mediaCard.getBoundingClientRect().height * 100) / 100;
       this.grid.style.setProperty('--workspace-card-height', height + 'px');
     } else if (!equalHeight) this.grid.style.removeProperty('--workspace-card-height');
-    this.shell.dataset.widthMode = this.manualWidth === null ? 'auto' : 'manual';
+    this.shell.dataset.widthMode = this.currentWidth === null ? 'auto' : 'manual';
     this.shell.dataset.resizable = String(!bounds.stacked && bounds.maximum > bounds.minimum);
-    this.output.textContent = (this.manualWidth === null ? '自适应' : '已调整') + ' · ' + width + ' px';
+    this.output.textContent = (this.currentWidth === null ? (focused ? '贴合视频' : '自适应') : '已调整') + ' · ' + width + ' px';
     for (const edge of this.edges) {
       edge.tabIndex = bounds.stacked || bounds.maximum <= bounds.minimum ? -1 : 0;
       edge.setAttribute('aria-valuemin', String(bounds.minimum));
@@ -113,7 +143,7 @@ class WorkspaceLayout {
     event.preventDefault();
     edge.focus({ preventScroll: true });
     this.drag = { edge, pointerId: event.pointerId, startX: event.clientX,
-      startWidth: this.shell.getBoundingClientRect().width, originalWidth: this.manualWidth,
+      startWidth: this.shell.getBoundingClientRect().width, originalWidth: this.currentWidth,
       direction: edge.dataset.resizeEdge === 'right' ? 1 : -1, moved: false };
     edge.setPointerCapture(event.pointerId);
     document.body.classList.add('workspace-resizing');
@@ -128,7 +158,7 @@ class WorkspaceLayout {
     drag.moved = true;
     const bounds = this.bounds();
     // The page remains centered: each edge moves by half the width change.
-    this.manualWidth = Math.round(clampWorkspace(drag.startWidth + delta * 2 * drag.direction, bounds.minimum, bounds.maximum));
+    this.currentWidth = Math.round(clampWorkspace(drag.startWidth + delta * 2 * drag.direction, bounds.minimum, bounds.maximum));
     this.schedule();
   }
 
@@ -136,7 +166,7 @@ class WorkspaceLayout {
     if (!this.drag) return;
     const drag = this.drag;
     this.drag = null;
-    if (cancel) this.manualWidth = drag.originalWidth;
+    if (cancel) this.currentWidth = drag.originalWidth;
     document.body.classList.remove('workspace-resizing');
     drag.edge.classList.remove('dragging');
     if (drag.edge.hasPointerCapture(drag.pointerId)) drag.edge.releasePointerCapture(drag.pointerId);
@@ -146,7 +176,7 @@ class WorkspaceLayout {
 
   reset() {
     this.finishDrag(true);
-    this.manualWidth = null;
+    this.currentWidth = null;
     this.schedule();
     this.onChange();
   }
@@ -159,8 +189,11 @@ class WorkspaceLayout {
     event.preventDefault();
     const direction = edge.dataset.resizeEdge === 'right' ? 1 : -1;
     const delta = (event.key === 'ArrowRight' ? 1 : -1) * direction * (event.shiftKey ? 80 : 20);
-    this.manualWidth = Math.round(event.key === 'Home' ? bounds.minimum : event.key === 'End' ? bounds.maximum
-      : clampWorkspace(this.shell.getBoundingClientRect().width + delta, bounds.minimum, bounds.maximum));
+    // Repeated keys can arrive before the next layout frame; accumulate the pending width.
+    const current = Number.isFinite(this.currentWidth) ? clampWorkspace(this.currentWidth, bounds.minimum, bounds.maximum)
+      : this.shell.getBoundingClientRect().width;
+    this.currentWidth = Math.round(event.key === 'Home' ? bounds.minimum : event.key === 'End' ? bounds.maximum
+      : clampWorkspace(current + delta, bounds.minimum, bounds.maximum));
     this.schedule();
     this.onChange();
   }

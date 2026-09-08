@@ -686,6 +686,11 @@ function bindMedia(media) {
   media.playbackRate = Number($("#playbackSpeed").value);
   media.addEventListener("timeupdate", syncActiveSegment);
   media.addEventListener("seeked", syncActiveSegment);
+  if (media.tagName === "VIDEO") {
+    for (const event of ["loadedmetadata", "resize"]) media.addEventListener(event, () => {
+      if (state.media === media) state.workspaceLayout?.schedule();
+    });
+  }
   state.workspaceLayout?.schedule();
 }
 
@@ -764,7 +769,7 @@ function setVideoFocus(enabled) {
   $("#focusVideo").setAttribute("aria-pressed", String(enabled));
   $("#focusVideo").textContent = enabled ? "恢复双栏" : "专注视频";
   state.reader?.schedule();
-  state.workspaceLayout?.schedule();
+  state.workspaceLayout?.setFocused(enabled);
 }
 
 function updateFollowUI() {

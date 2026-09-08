@@ -139,6 +139,7 @@ async function main() {
     await page.keyboard.press('Shift+ArrowLeft');
     await settle();
     const chosenWidth = await width();
+    assert.equal(chosenWidth, Number(await edge().getAttribute('aria-valuemax')) - 160, 'rapid repeated keys must accumulate');
     const cancelBounds = await edge().boundingBox();
     await page.mouse.move(cancelBounds.x + 8, cancelBounds.y + 100);
     await page.mouse.down();
@@ -179,6 +180,28 @@ async function main() {
     await page.locator('#focusVideo').click();
     await settle();
     assert.equal(await page.locator('#workspaceGrid').getAttribute('data-equal-height'), 'false');
+    const focusedDefault = await width();
+    assert.equal(focusedDefault, 1384, 'focus starts fitted to the video, not the saved dual-column width');
+    assert.notEqual(focusedDefault, chosenWidth);
+    const fittedVideo = await page.locator('video').boundingBox();
+    assert.ok(Math.abs(fittedVideo.width / fittedVideo.height - 16 / 9) < 0.001, 'focus must not add side bars');
+    await dragEdge('right', 120);
+    const widerVideo = await page.locator('video').boundingBox();
+    assert.ok(widerVideo.width > fittedVideo.width + 200 && widerVideo.height > fittedVideo.height + 100);
+    assert.ok(Math.abs(widerVideo.width / widerVideo.height - 16 / 9) < 0.001, 'manual focus width must retain video proportions');
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('sensevoice.settings.v2')).workspaceWidth), chosenWidth);
+    await edge().dblclick();
+    await settle();
+    assert.equal(await width(), focusedDefault);
+    await dragEdge('left', 40);
+    await page.locator('#focusVideo').click();
+    await settle();
+    assert.equal(await width(), chosenWidth, 'leaving focus restores the dual-column width');
+    await page.locator('#focusVideo').click();
+    await settle();
+    assert.equal(await width(), focusedDefault, 'every focus entry starts fitted to the video');
+    assert.equal(jobRequests, 1);
+    assert.equal(mediaRequests, 0, 'focus must not preload or refetch a large video');
     await page.locator('#focusVideo').click();
     await settle();
     await sameHeight();
@@ -268,8 +291,84 @@ async function main() {
     await settle();
     assert.equal(await width(), automaticWidth, "mobile adaptation must not overwrite the desktop preference");
     await sameHeight();
+    await page.locator('#focusVideo').click();
+    await settle();
+    // A local canvas stream supplies genuine video metadata and visible edge markers.
+    // This never accesses the camera, downloads media, or touches user files.
+    const setVideoFrame = async (frameWidth, frameHeight) => {
+      await page.locator('video').evaluate(async (media, [w, h]) => {
+        media.srcObject?.getTracks().forEach((track) => track.stop());
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        const gradient = ctx.createLinearGradient(0, 0, w, h);
+        gradient.addColorStop(0, '#174f3f'); gradient.addColorStop(1, '#397f99');
+        ctx.fillStyle = gradient; ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = '#c5f06a'; ctx.fillRect(0, 0, 12, h);
+        ctx.fillStyle = '#e5ad73'; ctx.fillRect(w - 12, 0, 12, h);
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+        ctx.font = Math.round(Math.min(w, h) / 13) + 'px sans-serif';
+        ctx.fillText(w + ' × ' + h, w / 2, h / 2);
+        media.srcObject = canvas.captureStream(1);
+        media.muted = true;
+        await media.play();
+        media.pause();
+      }, [frameWidth, frameHeight]);
+      await settle();
+      await page.waitForFunction(([w, h]) => {
+        const media = document.querySelector('video');
+        return media.videoWidth === w && media.videoHeight === h;
+      }, [frameWidth, frameHeight]);
+    };
+    const assertFittedFrame = async (frameWidth, frameHeight) => {
+      const videoBox = await page.locator('video').boundingBox();
+      const mountBox = await page.locator('#mediaMount').boundingBox();
+      assert.ok(Math.abs(videoBox.width / videoBox.height - frameWidth / frameHeight) < 0.001);
+      assert.ok(Math.abs(videoBox.width - mountBox.width) < 1 && Math.abs(videoBox.height - mountBox.height) < 1,
+        'the video must fill its container without padding or cropping');
+    };
+    for (const [w, h] of [[1280, 720], [1280, 960], [2560, 1080], [720, 1280]]) {
+      await setVideoFrame(w, h);
+      assert.equal(await width(), Math.round(Math.max(640, Math.min(1872, 1080 * 0.72 * w / h + 2))));
+      await assertFittedFrame(w, h);
+      await screenshot('focus-' + w + 'x' + h);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await settle();
+    await assertFittedFrame(720, 1280);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await screenshot('focus-portrait-mobile');
+    await setVideoFrame(1280, 720);
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await settle();
+    await assertFittedFrame(1280, 720);
+    await page.locator('#fullscreenVideo').click();
+    await page.waitForFunction(() => document.fullscreenElement?.tagName === 'VIDEO');
+    await page.evaluate(() => document.exitFullscreen());
+    await settle();
+    assert.equal(await width(), 1384, 'native fullscreen must not overwrite fitted focus width');
+    await assertFittedFrame(1280, 720);
+    await page.locator('video').evaluate((media) => media.srcObject?.getTracks().forEach((track) => track.stop()));
+    await dragEdge('right', 100);
+    assert.notEqual(await width(), 1384);
+    await page.locator('#backButton').click();
+    await page.locator('.history-item button').click();
+    await page.locator('#resultView').waitFor({ state: 'visible' });
+    await settle();
+    assert.equal(await page.locator('#focusVideo').getAttribute('aria-pressed'), 'true');
+    assert.equal(await width(), 1384, 'opening a result again starts with fitted focus width');
+    await dragEdge('left', 40);
+    await page.reload();
+    await page.locator('#resultView').waitFor({ state: 'visible' });
+    await settle();
+    assert.equal(await width(), 1384, 'a saved focus mode must not restore a temporary focus width');
+    await page.locator('#focusVideo').click();
+    await settle();
+    assert.equal(await width(), automaticWidth);
+    await sameHeight();
     assert.deepEqual(errors, []);
     console.log("PASS: remembered width, untouched homepage, double-click reset, mobile stacking, scrollable speaker dialog and no browser errors");
+    console.log('PASS: focus defaults, isolated manual widths, real 16:9/4:3/ultrawide/portrait video metadata, mobile and fullscreen return without layout bars');
   } finally {
     await browser.close();
   }

@@ -22,6 +22,14 @@ test('manual widths are clamped without changing the requested preference', () =
 });
 test('audio and focused video have sensible independent defaults', () => {
   assert.equal(chooseWorkspaceWidth({ ...defaults, video: false }), 1240);
-  assert.equal(chooseWorkspaceWidth({ ...defaults, focused: true }), 1872);
+  assert.equal(chooseWorkspaceWidth({ ...defaults, focused: true }), 1384);
   assert.equal(chooseWorkspaceWidth({ ...defaults, focused: true, manual: 1400 }), 1400);
+});
+test('focused video width follows aspect ratio, safe reader width and viewport bounds', () => {
+  assert.equal(chooseWorkspaceWidth({ ...defaults, focused: true, aspect: 4 / 3 }), 1039);
+  assert.equal(chooseWorkspaceWidth({ ...defaults, focused: true, aspect: 9 / 16 }), 640);
+  assert.equal(chooseWorkspaceWidth({ ...defaults, focused: true, aspect: 3 }), 1872);
+  assert.equal(chooseWorkspaceWidth({ ...defaults, focused: true, available: 292 }), 292);
+  assert.equal(chooseWorkspaceWidth({ ...defaults, focused: true, aspect: NaN }), 1384);
+  assert.equal(chooseWorkspaceWidth({ ...defaults, focused: true, aspect: 0 }), 1384);
 });
