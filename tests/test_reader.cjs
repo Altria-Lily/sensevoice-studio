@@ -64,7 +64,8 @@ async function main() {
     assert.equal(mediaRequests, 0, "opening text must not preload a multi-GB video");
     const player = await page.locator("#mediaMount video").boundingBox();
     assert.ok(player.width > 650 && player.height > 365, JSON.stringify(player));
-    assert.equal(Math.round((await page.locator("main").boundingBox()).width), 1240);
+    assert.ok(Math.round((await page.locator("main").boundingBox()).width) > 1240);
+    await page.waitForFunction(() => Math.abs(document.querySelector('.media-card').getBoundingClientRect().height - document.querySelector('.transcript-panel').getBoundingClientRect().height) < 1);
     assert.equal(await page.locator("[data-page-step], #pageNumber").count(), 0);
     console.log("PASS: 12,000 segments open in " + openMs + " ms, bounded rows, video " + Math.round(player.width) + " × " + Math.round(player.height));
 

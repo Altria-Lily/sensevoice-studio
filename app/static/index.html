@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f5f1e8">
   <meta name="description" content="基于 FunASR 与 SenseVoice 的本地视频转写工具">
   <title>声刻 · SenseVoice Studio</title>
-  <link rel="stylesheet" href="/static/app.css?v=6">
+  <link rel="stylesheet" href="/static/app.css?v=7">
 </head>
 <body>
   <div class="noise" aria-hidden="true"></div>
@@ -166,16 +166,6 @@
           所有任务
         </button>
         <div class="result-actions">
-          <button class="secondary-button compact" id="speakerSettingsButton" type="button" aria-haspopup="dialog" aria-controls="speakerDialog">说话人设置 <span id="speakerButtonCount" class="button-count">0</span></button>
-          <div class="layout-menu">
-            <button class="secondary-button compact" id="pageWidthButton" type="button" aria-expanded="false" aria-controls="pageWidthPanel">页面宽度 <span aria-hidden="true">⌄</span></button>
-            <section id="pageWidthPanel" class="layout-popover" aria-label="页面宽度设置" hidden>
-              <div class="layout-panel-heading"><label for="pageWidth">拖动调整宽度</label><output id="pageWidthValue" for="pageWidth">1240 px</output></div>
-              <input id="pageWidth" type="range" min="960" max="1920" step="1" value="1240" aria-describedby="pageWidthHint">
-              <p id="pageWidthHint">仅调整校对页，首页宽度不变。</p>
-              <div class="layout-panel-footer"><span>本机记住你的选择</span><button id="resetPageWidth" type="button">恢复首页宽度</button></div>
-            </section>
-          </div>
           <button class="secondary-button compact" id="copyButton" type="button">复制全文</button>
           <button class="secondary-button compact" id="saveButton" type="button">保存修改</button>
           <div class="export-menu">
@@ -206,7 +196,10 @@
         </div>
         <a class="download-link" id="downloadTxt" data-format="txt" download>下载 TXT 文字 ↓</a>
       </div>
-      <div class="workspace-grid">
+      <div id="workspaceShell" class="workspace-shell">
+      <div class="workspace-resize-edge left" data-resize-edge="left" role="separator" tabindex="0" aria-orientation="vertical" aria-label="拖动左边框调整页面宽度" aria-controls="workspaceGrid" aria-describedby="workspaceResizeHint" aria-valuemin="960" aria-valuemax="1920" aria-valuenow="1240" title="拖动调整宽度 · 双击恢复自适应"></div>
+      <div class="workspace-resize-edge right" data-resize-edge="right" role="separator" tabindex="0" aria-orientation="vertical" aria-label="拖动右边框调整页面宽度" aria-controls="workspaceGrid" aria-describedby="workspaceResizeHint" aria-valuemin="960" aria-valuemax="1920" aria-valuenow="1240" title="拖动调整宽度 · 双击恢复自适应"></div>
+      <div id="workspaceGrid" class="workspace-grid">
         <aside class="media-column">
           <div class="media-card">
             <div class="media-heading">
@@ -255,9 +248,12 @@
         </aside>
 
         <section class="transcript-panel">
+          <div class="transcript-heading">
           <div class="transcript-tabs" role="tablist" aria-label="文字查看方式">
             <button id="timelineTab" type="button" role="tab" aria-selected="true" aria-controls="timelinePane">时间轴 · 可编辑</button>
             <button id="fullTextTab" type="button" role="tab" aria-selected="false" aria-controls="fullTextPane" tabindex="-1">全文阅读</button>
+          </div>
+          <button class="speaker-settings-button" id="speakerSettingsButton" type="button" aria-haspopup="dialog" aria-controls="speakerDialog">说话人设置 <span id="speakerButtonCount" class="button-count">0</span></button>
           </div>
           <div id="timelinePane" role="tabpanel" aria-labelledby="timelineTab">
           <div class="transcript-toolbar">
@@ -285,6 +281,8 @@
           </div>
         </section>
       </div>
+      </div>
+      <div class="workspace-resize-hint" id="workspaceResizeHint"><span>↔ 拖动左右外边框调整宽度 · 双击或按 Enter 恢复自适应</span><output id="workspaceWidthValue">自适应</output></div>
       <dialog id="speakerDialog" class="speaker-dialog" aria-labelledby="speakerDialogTitle" aria-describedby="speakerDialogHelp">
         <div class="speaker-dialog-heading">
           <div><p class="eyebrow">SPEAKERS / 发言人管理</p><h2 id="speakerDialogTitle">说话人设置 <span id="speakerCount">0 位</span></h2></div>
@@ -305,6 +303,7 @@
   <div id="resultLoading" class="loading-banner" role="status" hidden><span class="loading-spinner" aria-hidden="true"></span><span>正在读取转写文字…</span><button id="cancelReading" type="button">取消打开</button></div>
   <script src="/static/virtual-timeline.js?v=6" defer></script>
   <script src="/static/subtitles.js?v=5" defer></script>
-  <script src="/static/app.js?v=6" defer></script>
+  <script src="/static/workspace-layout.js?v=7" defer></script>
+  <script src="/static/app.js?v=7" defer></script>
 </body>
 </html>

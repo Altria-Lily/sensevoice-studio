@@ -1,5 +1,5 @@
 // Layout and dialog regression: all job reads/writes are synthetic and local.
-// CAPTURE_LAYOUT=1 saves desktop, popover, dialog and mobile screenshots in .tmp.
+// CAPTURE_LAYOUT=1 saves equal-height desktop, edge-drag, dialog and mobile screenshots in .tmp.
 const assert = require("node:assert/strict");
 const { chromium } = require("playwright");
 
@@ -19,6 +19,12 @@ async function main() {
   try {
     const context = await browser.newContext({ baseURL, viewport: { width: 1920, height: 1080 } });
     const page = await context.newPage();
+    await page.addInitScript(() => {
+      if (!localStorage.getItem('layout.fixture.seeded')) {
+        localStorage.setItem('sensevoice.settings.v2', JSON.stringify({ pageWidth: 960, playbackSpeed: '1.5' }));
+        localStorage.setItem('layout.fixture.seeded', 'true');
+      }
+    });
     const errors = [];
     let jobRequests = 0;
     let mediaRequests = 0;
@@ -38,7 +44,7 @@ async function main() {
       for (const segment of lastPatch.segments) Object.assign(job.transcript.segments[segment.id], segment);
       return route.fulfill({ json: job.transcript });
     });
-    const settle = async () => { for (let i = 0; i < 3; i += 1) await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve))); };
+    const settle = async () => { for (let i = 0; i < 6; i += 1) await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve))); };
     const width = async (selector = "main") => Math.round((await page.locator(selector).boundingBox()).width);
     const anchor = () => page.evaluate(() => {
       const bounds = document.querySelector("#timelineScroll").getBoundingClientRect();
@@ -56,7 +62,26 @@ async function main() {
     const screenshot = async (name) => {
       if (process.env.CAPTURE_LAYOUT !== "1") return;
       console.log("CAPTURE=" + name);
-      await page.screenshot({ path: ".tmp/layout-" + name + ".jpg", type: "jpeg", quality: 70 });
+      await page.screenshot({ path: ".tmp/frame-layout-" + name + ".jpg", type: "jpeg", quality: 70 });
+    };
+    const edge = (side = 'right') => page.locator('[data-resize-edge="' + side + '"]');
+    const sameHeight = async () => {
+      await page.waitForFunction(() => {
+        const left = document.querySelector('.media-card').getBoundingClientRect();
+        const right = document.querySelector('.transcript-panel').getBoundingClientRect();
+        return Math.abs(left.height - right.height) < 1 && Math.abs(left.top - right.top) < 1;
+      });
+      const video = await page.locator('video').boundingBox();
+      assert.ok(Math.abs(video.width / video.height - 16 / 9) < 0.01, 'video must retain its aspect ratio');
+    };
+    const dragEdge = async (side, delta) => {
+      const box = await edge(side).boundingBox();
+      const y = Math.min(950, box.y + box.height / 2);
+      await page.mouse.move(box.x + box.width / 2, y);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + delta, y, { steps: 24 });
+      await page.mouse.up();
+      await settle();
     };
     await page.goto("/");
     await page.locator(".history-item button").waitFor();
@@ -65,73 +90,99 @@ async function main() {
     await page.locator(".history-item button").click();
     await page.locator("#resultView").waitFor({ state: "visible" });
     await settle();
-    assert.equal(await width(), homeWidth);
-    assert.equal(await width(".topbar"), homeWidth);
+    const automaticWidth = await width();
+    assert.ok(automaticWidth > homeWidth && automaticWidth <= 1872);
+    assert.equal(await width(".topbar"), automaticWidth);
+    await sameHeight();
+    assert.equal(await page.locator('#playbackSpeed').inputValue(), '1.5', 'unrelated preferences survive the layout migration');
+    assert.equal(await page.locator('#pageWidthButton, #pageWidthPanel, #pageWidth').count(), 0);
+    assert.equal(await page.locator('.result-actions #speakerSettingsButton').count(), 0);
+    assert.equal(await page.locator('.transcript-heading #speakerSettingsButton').count(), 1);
     assert.equal(await page.locator("#speakerDialog").isVisible(), false);
     assert.equal(await page.locator(".media-column [data-speaker]").count(), 0);
     assert.equal(await page.locator("#speakerButtonCount").textContent(), "16");
     await screenshot("desktop-default");
-    console.log("PASS: result and homepage default to the same 1240 px width; speaker list is hidden behind a button");
+    console.log("PASS: automatic equal-height cards at " + automaticWidth + " px, native video aspect, no width button and speaker settings inside the text panel");
 
     await page.locator('[data-segment-text="0"]').fill("调整布局之前的草稿");
     await page.locator("#timelineScroll").focus();
     await page.locator("#timelineScroll").evaluate((element) => { element.scrollTop = element.scrollHeight * 0.37; });
     await settle();
     const before = await anchor();
-    await page.locator("#pageWidthButton").click();
-    await screenshot("width-control");
     await page.evaluate(() => {
       window.layoutLongTasks = [];
       new PerformanceObserver((list) => window.layoutLongTasks.push(...list.getEntries().map((entry) => entry.duration))).observe({ type: "longtask" });
     });
-    const bounds = await page.locator("#pageWidth").boundingBox();
-    const control = await page.locator("#pageWidth").evaluate((element) => ({ min: Number(element.min), max: Number(element.max), value: Number(element.value) }));
-    const thumbX = bounds.x + 8 + (bounds.width - 16) * (control.value - control.min) / (control.max - control.min);
-    await page.mouse.move(thumbX, bounds.y + bounds.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(bounds.x + bounds.width - 8, bounds.y + bounds.height / 2, { steps: 35 });
-    await page.mouse.up();
-    await settle();
-    assert.ok(await width() > 1750);
+    await dragEdge('right', -160);
+    assert.ok(Math.abs(await width() - (automaticWidth - 320)) <= 2);
+    await sameHeight();
+    const rightDraggedWidth = await width();
+    await dragEdge('left', -60);
+    assert.ok(Math.abs(await width() - (rightDraggedWidth + 120)) <= 2);
     assert.equal(await width(), await width(".topbar"));
-    assert.equal(Math.round((await page.locator("#pageWidth").boundingBox()).x), Math.round(bounds.x), "slider must not move under the pointer");
+    await sameHeight();
+    await screenshot('edge-drag');
     assert.ok(Math.abs(await anchor() - before) <= 1, "dragging should preserve the first visible segment");
     assert.ok(await page.locator(".segment").count() <= 81);
     assert.equal(await noOverlap(), true);
-    const chosenWidth = await width();
-    await page.locator("#pageWidth").focus();
+    await edge().focus();
     await page.keyboard.press("Home");
     await settle();
     assert.equal(await width(), 960);
+    await sameHeight();
     assert.ok(Math.abs(await anchor() - before) <= 1);
     assert.equal(await noOverlap(), true);
     await page.keyboard.press("End");
     await settle();
-    assert.equal(await width(), chosenWidth);
+    assert.equal(await width(), Number(await edge().getAttribute('aria-valuemax')));
+    await page.keyboard.press('Shift+ArrowLeft');
+    await page.keyboard.press('Shift+ArrowLeft');
+    await settle();
+    const chosenWidth = await width();
+    const cancelBounds = await edge().boundingBox();
+    await page.mouse.move(cancelBounds.x + 8, cancelBounds.y + 100);
+    await page.mouse.down();
+    await page.mouse.move(cancelBounds.x - 92, cancelBounds.y + 100, { steps: 12 });
+    await settle();
+    assert.ok(await width() < chosenWidth);
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    await settle();
+    assert.equal(await width(), chosenWidth, 'Esc must cancel an in-progress resize');
+    assert.equal(await page.evaluate(() => document.body.classList.contains('workspace-resizing')), false);
     const longestTask = Math.round(await page.evaluate(() => Math.max(0, ...window.layoutLongTasks)));
     assert.ok(longestTask < 1000, "dragging must not freeze for a second");
     assert.equal(jobRequests, 1, "width changes must not refetch transcript data");
     assert.equal(mediaRequests, 0, "width changes must not download the video");
-    await page.keyboard.press("Escape");
-    assert.equal(await page.locator("#pageWidthPanel").isVisible(), false);
-    assert.equal(await page.evaluate(() => document.activeElement.id), "pageWidthButton");
     await page.locator("#fullTextTab").click();
     assert.ok((await page.locator("#fullText").inputValue()).includes("调整布局之前的草稿"));
-    await page.locator("#pageWidthButton").click();
-    await page.locator("#pageWidth").focus();
+    await edge().focus();
     await page.keyboard.press("Home");
     await settle();
-    await page.keyboard.press("Escape");
     await page.locator("#timelineTab").click();
     await settle();
     assert.ok(Math.abs(await anchor() - before) <= 1, "resize from full-text view must retain the hidden timeline anchor");
     assert.equal(await noOverlap(), true);
-    await page.locator("#pageWidthButton").click();
-    await page.locator("#pageWidth").focus();
+    await edge().focus();
     await page.keyboard.press("End");
     await settle();
-    await page.keyboard.press("Escape");
-    console.log("PASS: real pointer drag, fixed slider position, keyboard bounds, anchored reading, bounded rows; longest task " + longestTask + " ms");
+    await page.keyboard.press('Shift+ArrowLeft');
+    await page.keyboard.press('Shift+ArrowLeft');
+    await settle();
+    assert.equal(await width(), chosenWidth);
+    await sameHeight();
+    await page.locator('#subtitleButton').click();
+    await settle();
+    await sameHeight();
+    assert.equal(await width(), chosenWidth, 'subtitle settings must not change the chosen width');
+    await page.locator('#subtitleButton').click();
+    await page.locator('#focusVideo').click();
+    await settle();
+    assert.equal(await page.locator('#workspaceGrid').getAttribute('data-equal-height'), 'false');
+    await page.locator('#focusVideo').click();
+    await settle();
+    await sameHeight();
+    console.log("PASS: both edges, pointer capture, keyboard bounds, Esc cancellation, full text, subtitles, focus mode and anchored rows; longest task " + longestTask + " ms");
 
     await page.locator("#speakerSettingsButton").click();
     assert.equal(await page.evaluate(() => document.activeElement.id), "closeSpeakerSettings");
@@ -178,29 +229,30 @@ async function main() {
 
     await page.reload();
     await page.locator("#resultView").waitFor({ state: "visible" });
+    await settle();
     assert.equal(await width(), chosenWidth, "custom width must persist on reload");
     await page.locator("#backButton").click();
     assert.equal(await width(), homeWidth, "custom result width must not change the homepage");
     await page.locator(".history-item button").click();
     await page.locator("#resultView").waitFor({ state: "visible" });
+    await settle();
     assert.equal(await width(), chosenWidth);
-    await page.locator("#pageWidthButton").click();
-    await page.locator("#resetPageWidth").click();
-    assert.equal(await width(), homeWidth);
-    await page.keyboard.press("Escape");
+    await edge().dblclick();
+    await settle();
+    assert.equal(await width(), automaticWidth);
+    assert.equal(await page.locator('#workspaceShell').getAttribute('data-width-mode'), 'auto');
+    await sameHeight();
     await page.setViewportSize({ width: 1440, height: 1000 });
     await settle();
-    assert.equal(await width(), homeWidth);
+    assert.ok(await width() > homeWidth && await width() <= 1392);
+    await sameHeight();
     await screenshot("desktop-1440");
     for (const viewportWidth of [390, 320]) {
       await page.setViewportSize({ width: viewportWidth, height: 844 });
       await settle();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-      await page.locator("#pageWidthButton").click();
-      assert.equal(await page.locator("#pageWidth").isDisabled(), true);
-      const popover = await page.locator("#pageWidthPanel").boundingBox();
-      assert.ok(popover.x >= 0 && popover.x + popover.width <= viewportWidth);
-      await page.keyboard.press("Escape");
+      assert.equal(await edge().isVisible(), false);
+      assert.equal(await page.locator('#workspaceGrid').getAttribute('data-equal-height'), 'false');
       await page.locator("#speakerSettingsButton").click();
       const dialog = await page.locator("#speakerDialog").boundingBox();
       assert.ok(dialog.x >= 0 && dialog.x + dialog.width <= viewportWidth && dialog.height < 844);
@@ -209,13 +261,15 @@ async function main() {
       assert.equal(await page.locator("#speakerList").evaluate((element) => element.scrollHeight > element.clientHeight), true);
       await screenshot("mobile-dialog-" + viewportWidth);
       await page.locator("#finishSpeakerSettings").click();
+      await screenshot('mobile-' + viewportWidth);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     }
     await page.setViewportSize({ width: 1920, height: 1080 });
     await settle();
-    assert.equal(await width(), homeWidth, "mobile adaptation must not overwrite the desktop preference");
+    assert.equal(await width(), automaticWidth, "mobile adaptation must not overwrite the desktop preference");
+    await sameHeight();
     assert.deepEqual(errors, []);
-    console.log("PASS: remembered width, untouched homepage, reset to 1240 px, mobile controls, scrollable speaker dialog and no browser errors");
+    console.log("PASS: remembered width, untouched homepage, double-click reset, mobile stacking, scrollable speaker dialog and no browser errors");
   } finally {
     await browser.close();
   }

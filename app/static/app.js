@@ -32,9 +32,7 @@ const state = {
   subtitleFilename: "",
   subtitleReadEpoch: 0,
   subtitleLoading: false,
-  pageWidth: 1240,
-  pageWidthFrame: null,
-  pageWidthDragging: false,
+  workspaceLayout: null,
 };
 
 const speakerColors = ["#28745d", "#c05f3f", "#6a5eaa", "#b4871f", "#3576a8", "#a44f78"];
@@ -77,7 +75,6 @@ async function api(url, options = {}) {
 
 function showView(name) {
   closeSpeakerSettings();
-  setPageWidthPanel(false);
   state.view = name;
   document.body.dataset.view = name;
   clearInterval(state.processingTimer);
@@ -86,6 +83,7 @@ function showView(name) {
   $("#landingView").hidden = name !== "landing";
   $("#progressView").hidden = name !== "progress";
   $("#resultView").hidden = name !== "result";
+  state.workspaceLayout?.setActive(name === "result");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -105,7 +103,7 @@ function rememberSettings() {
     autoFollow: $("#autoFollow").checked,
     textSize: $("#textSize").value,
     focusVideo: $("#focusVideo").getAttribute("aria-pressed") === "true",
-    pageWidth: state.pageWidth,
+    workspaceWidth: state.workspaceLayout?.preference ?? null,
   };
   try { localStorage.setItem("sensevoice.settings.v2", JSON.stringify(preferences)); }
   catch (_) { /* Private browsing may disable storage; the current settings still work. */ }
@@ -126,7 +124,8 @@ function restoreSettings(reset = false) {
   setSelect("#textSize", preferences.textSize, "15");
   document.documentElement.style.setProperty("--transcript-text-size", $("#textSize").value + "px");
   setVideoFocus(preferences.focusVideo === true);
-  setPageWidth(preferences.pageWidth ?? 1240);
+  // Old slider widths are intentionally not carried into the equal-height layout.
+  state.workspaceLayout.restore(preferences.workspaceWidth);
   $("#speakerToggle").checked = preferences.identifySpeakers !== false;
   $("#itnToggle").checked = preferences.useItn !== false;
   $("#autoFollow").checked = preferences.autoFollow !== false;
@@ -135,51 +134,6 @@ function restoreSettings(reset = false) {
   $("#speakerNumber").disabled = !$("#speakerToggle").checked;
   if (state.media) state.media.playbackRate = Number($("#playbackSpeed").value);
   if (reset) { rememberSettings(); toast("已恢复默认设置"); }
-}
-
-function updatePageWidthUI() {
-  const available = Math.max(1, document.documentElement.clientWidth - (innerWidth <= 760 ? 28 : 48));
-  const maximum = Math.min(1920, available);
-  const width = Math.round(Math.min(state.pageWidth, maximum));
-  const range = $("#pageWidth");
-  range.min = String(Math.min(960, maximum));
-  range.max = String(maximum);
-  range.value = String(width);
-  range.disabled = available <= 960;
-  range.setAttribute("aria-valuetext", width + " 像素");
-  $("#pageWidthValue").textContent = width + " px";
-  $("#pageWidthHint").textContent = range.disabled
-    ? "窄窗口自动适应；放大窗口后可拖动调整。"
-    : "仅调整校对页，首页宽度不变。";
-}
-
-function setPageWidth(value) {
-  const width = Number(value);
-  state.pageWidth = Number.isFinite(width) && width >= 960 && width <= 1920 ? Math.round(width) : 1240;
-  document.documentElement.style.setProperty("--result-page-width", state.pageWidth + "px");
-  updatePageWidthUI();
-  // The reader's ResizeObserver measures only mounted rows and retains its anchor.
-  // Do not rebuild the transcript or fetch media during a layout adjustment.
-}
-
-function positionPageWidthPanel() {
-  const panel = $("#pageWidthPanel");
-  if (panel.hidden) return;
-  const button = $("#pageWidthButton").getBoundingClientRect();
-  const width = Math.min(304, document.documentElement.clientWidth - 28);
-  panel.style.width = width + "px";
-  panel.style.left = Math.max(14, Math.min(button.right - width, document.documentElement.clientWidth - width - 14)) + "px";
-  panel.style.top = Math.max(8, Math.min(button.bottom + 8, innerHeight - panel.offsetHeight - 8)) + "px";
-}
-
-function setPageWidthPanel(open, restoreFocus = false) {
-  $("#pageWidthPanel").hidden = !open;
-  $("#pageWidthButton").setAttribute("aria-expanded", String(open));
-  if (open) {
-    updatePageWidthUI();
-    // Keep the slider under the pointer while its parent page changes width.
-    positionPageWidthPanel();
-  } else if (restoreFocus) $("#pageWidthButton").focus({ preventScroll: true });
 }
 
 function updateSpeakerSaveStatus(message = "") {
@@ -192,7 +146,6 @@ function updateSpeakerSaveStatus(message = "") {
 
 function openSpeakerSettings() {
   if (!state.activeJob?.transcript || $("#speakerDialog").open) return;
-  setPageWidthPanel(false);
   $("#exportPopover").hidden = true;
   updateSpeakerSaveStatus();
   $("#speakerDialog").showModal();
@@ -719,6 +672,7 @@ function renderMedia(job) {
 
 function bindMedia(media) {
   state.media = media;
+  if (media.tagName !== "VIDEO") setVideoFocus(false);
   cancelSubtitleImport();
   state.subtitleSource = "transcript";
   state.subtitleFilename = "";
@@ -732,6 +686,7 @@ function bindMedia(media) {
   media.playbackRate = Number($("#playbackSpeed").value);
   media.addEventListener("timeupdate", syncActiveSegment);
   media.addEventListener("seeked", syncActiveSegment);
+  state.workspaceLayout?.schedule();
 }
 
 function subtitleMessage(message = "", error = false) {
@@ -809,6 +764,7 @@ function setVideoFocus(enabled) {
   $("#focusVideo").setAttribute("aria-pressed", String(enabled));
   $("#focusVideo").textContent = enabled ? "恢复双栏" : "专注视频";
   state.reader?.schedule();
+  state.workspaceLayout?.schedule();
 }
 
 function updateFollowUI() {
@@ -1110,6 +1066,8 @@ function goHome() {
 
 function bindEvents() {
   state.subtitles = new SubtitlePlayer(updateSubtitleUI);
+  state.workspaceLayout = new WorkspaceLayout({ shell: $("#workspaceShell"), grid: $("#workspaceGrid"),
+    mediaCard: $(".media-card"), mediaMount: $("#mediaMount"), output: $("#workspaceWidthValue"), onChange: rememberSettings });
   state.reader = new VirtualTimeline({
     viewport: $("#timelineScroll"), list: $("#timeline"), createRow: createSegmentRow,
     onRender: resizeVisibleTextareas,
@@ -1155,36 +1113,6 @@ function bindEvents() {
     if (event.target !== event.currentTarget) return;
     const box = event.currentTarget.getBoundingClientRect();
     if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) closeSpeakerSettings();
-  });
-  $("#pageWidthButton").addEventListener("click", () => {
-    $("#exportPopover").hidden = true;
-    setPageWidthPanel($("#pageWidthPanel").hidden);
-  });
-  $("#pageWidth").addEventListener("input", (event) => {
-    const width = event.target.value;
-    cancelAnimationFrame(state.pageWidthFrame);
-    state.pageWidthFrame = requestAnimationFrame(() => { state.pageWidthFrame = null; setPageWidth(width); });
-  });
-  $("#pageWidth").addEventListener("change", (event) => {
-    cancelAnimationFrame(state.pageWidthFrame);
-    state.pageWidthFrame = null;
-    setPageWidth(event.target.value);
-    rememberSettings();
-  });
-  $("#pageWidth").addEventListener("pointerdown", () => { state.pageWidthDragging = true; });
-  ["pointerup", "pointercancel", "blur"].forEach((name) => window.addEventListener(name, () => { state.pageWidthDragging = false; }));
-  $("#resetPageWidth").addEventListener("click", () => {
-    cancelAnimationFrame(state.pageWidthFrame);
-    state.pageWidthFrame = null;
-    setPageWidth(1240);
-    rememberSettings();
-  });
-  window.addEventListener("resize", () => { updatePageWidthUI(); positionPageWidthPanel(); });
-  window.addEventListener("scroll", () => {
-    if (!state.pageWidthDragging) positionPageWidthPanel();
-  }, { passive: true });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !$("#pageWidthPanel").hidden) { event.preventDefault(); setPageWidthPanel(false, true); }
   });
   $("#copyButton").addEventListener("click", copyTranscript);
   $("#cancelReading").addEventListener("click", cancelResultLoad);
@@ -1269,12 +1197,10 @@ function bindEvents() {
   $("#searchInput").addEventListener("input", searchTimeline);
   $("#exportButton").addEventListener("click", (event) => {
     event.stopPropagation();
-    setPageWidthPanel(false);
     $("#exportPopover").hidden = !$("#exportPopover").hidden;
   });
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".export-menu")) $("#exportPopover").hidden = true;
-    if (!event.target.closest(".layout-menu")) setPageWidthPanel(false);
   });
   window.addEventListener("beforeunload", (event) => {
     if (state.uploadXhr || state.dirty || state.saving) { event.preventDefault(); event.returnValue = ""; }
