@@ -1,0 +1,13 @@
+# install.ps1 installs a hardware-appropriate PyTorch wheel first.
+torch>=2.6
+torchaudio>=2.6
+funasr==1.4.14
+modelscope>=1.28
+numpy>=1.24,<2.0
+soundfile>=0.12
+fastapi==0.141.1
+uvicorn[standard]>=0.35,<1
+python-multipart>=0.0.20,<1
+python-dotenv>=1.0,<2
+imageio-ffmpeg==0.6.0
+

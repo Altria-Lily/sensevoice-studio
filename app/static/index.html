@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f1e8">
+  <meta name="description" content="基于 FunASR 与 SenseVoice 的本地视频转写工具">
+  <title>声刻 · SenseVoice Studio</title>
+  <link rel="stylesheet" href="/static/app.css?v=6">
+</head>
+<body>
+  <div class="noise" aria-hidden="true"></div>
+  <header class="topbar">
+    <button class="brand" id="brandButton" type="button" aria-label="返回首页">
+      <span class="brand-mark" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span>
+      </span>
+      <span>
+        <strong>声刻</strong>
+        <small>SenseVoice Studio</small>
+      </span>
+    </button>
+    <div class="engine-status" id="engineStatus" title="检查运行环境">
+      <span class="status-dot"></span>
+      <span>正在检查环境</span>
+    </div>
+  </header>
+
+  <main>
+    <section id="landingView" class="landing-view">
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow"><span>LOCAL AI</span> · 音视频转写工作台</p>
+          <h1>让每一句声音，<br><em>落在准确的时间上。</em></h1>
+          <p class="hero-lead">拖入视频或音频，自动识别文字、时间轴与不同说话人。数据只在你的电脑上处理。</p>
+          <a class="text-entry" href="#historySection">已经转写过？到“最近任务”查看文字 ↓</a>
+          <div class="capability-row" aria-label="功能">
+            <span>中英日韩粤</span>
+            <i></i>
+            <span>说话人分离</span>
+            <i></i>
+            <span>多格式字幕</span>
+          </div>
+        </div>
+
+        <div class="upload-card">
+          <form id="uploadForm">
+            <label class="drop-zone" id="dropZone" for="fileInput">
+              <input id="fileInput" name="file" type="file" accept="video/*,audio/*,.mkv,.m4v,.flac,.wav,.m4a,.opus" required>
+              <span class="upload-icon" aria-hidden="true">
+                <svg viewBox="0 0 48 48" fill="none"><path d="M24 32V10m0 0-8 8m8-8 8 8M10 29v7a4 4 0 0 0 4 4h20a4 4 0 0 0 4-4v-7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <strong id="dropTitle">将音视频拖到这里</strong>
+              <span id="dropHint">或点击选择文件 · 最大 10 GB</span>
+              <span class="file-pill" id="filePill" hidden></span>
+            </label>
+
+            <div class="form-options">
+              <label class="field">
+                <span>识别语言</span>
+                <select id="languageSelect" name="language">
+                  <option value="auto">自动检测</option>
+                  <option value="zh">普通话</option>
+                  <option value="yue">粤语</option>
+                  <option value="en">英语</option>
+                  <option value="ja">日语</option>
+                  <option value="ko">韩语</option>
+                </select>
+              </label>
+              <label class="toggle-field">
+                <span>
+                  <strong>区分说话人</strong>
+                  <small>CAM++ 自动聚类</small>
+                </span>
+                <input id="speakerToggle" type="checkbox" checked>
+                <span class="toggle" aria-hidden="true"></span>
+              </label>
+            </div>
+
+            <details class="advanced-settings">
+              <summary>更多设置 <small>说话人数 · 数字格式 · 识别批次</small></summary>
+              <div class="settings-grid">
+                <label class="field">
+                  <span>说话人数（不确定时留空）</span>
+                  <input id="speakerNumber" type="number" min="1" max="20" step="1" placeholder="自动估计">
+                </label>
+                <label class="field">
+                  <span>识别批次大小</span>
+                  <select id="batchSizeSelect">
+                    <option value="">使用服务器默认值</option>
+                    <option value="15">15 秒 · 节省显存</option>
+                    <option value="30">30 秒 · 较小批次</option>
+                    <option value="60">60 秒 · 标准</option>
+                    <option value="120">120 秒 · 大显存</option>
+                  </select>
+                </label>
+                <label class="toggle-field setting-wide">
+                  <span><strong>数字与文本格式化</strong><small>将口语数字等转换为书面格式（ITN）</small></span>
+                  <input id="itnToggle" type="checkbox" checked>
+                  <span class="toggle" aria-hidden="true"></span>
+                </label>
+              </div>
+              <p class="settings-tip">人数为聚类参考，不是身份识别；批次越大通常越占显存，不影响上传上限。设置会记住在此浏览器中。</p>
+              <button class="text-button" id="resetSettings" type="button">恢复默认设置</button>
+            </details>
+            <p class="form-error" id="formError" role="alert" hidden></p>
+            <button class="primary-button" id="startButton" type="submit" disabled>
+              <span>开始转写</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <p class="privacy-note"><span>⌁</span> 文件仅上传到本机服务，不发送到云端</p>
+            <p class="storage-note" id="storageNote">原文件、音轨和文字保存在项目 data/jobs 目录。</p>
+          </form>
+        </div>
+      </div>
+
+      <section class="history-section" id="historySection">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">RECENT</p>
+            <h2>最近任务 · 查看文字</h2>
+          </div>
+          <button class="text-button" id="refreshHistory" type="button">刷新</button>
+        </div>
+        <p class="history-help">完成后点击“查看文本”，可查看全文、时间轴和说话人；刷新页面或重启服务后仍可在这里找到结果。</p>
+        <p class="history-empty" id="emptyHistory" hidden>还没有任务。选择一个音视频开始，完成后的文字会出现在这里。</p>
+        <div class="history-grid" id="historyGrid"></div>
+      </section>
+    </section>
+
+    <section id="progressView" class="progress-view" hidden>
+      <div class="progress-card">
+        <div class="wave-loader" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <p class="eyebrow" id="progressEyebrow">PROCESSING</p>
+        <ol class="progress-steps" aria-label="处理流程">
+          <li data-step="upload">1 上传到本机</li><li data-step="process">2 识别语音</li><li data-step="result">3 查看文字</li>
+        </ol>
+        <h2 id="progressFilename">正在处理</h2>
+        <p id="progressStage">正在准备文件…</p>
+        <div class="progress-track" id="progressTrack" role="progressbar" aria-label="上传进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progressBar"></div></div>
+        <div class="progress-meta">
+          <span id="progressPercent">0%</span>
+          <span id="progressHelp">准备上传</span>
+        </div>
+        <p class="upload-details" id="uploadDetails" aria-live="polite"></p>
+        <p class="progress-location" id="progressLocation"></p>
+        <div id="processingDetails" class="processing-details" hidden>
+          <div class="processing-clock" id="processingClock"></div>
+          <div id="stageCards"></div>
+        </div>
+        <div class="first-run-note" id="firstRunNote" hidden>
+          <strong>第一次会久一点</strong>
+          <span>正在下载 SenseVoice、FSMN-VAD、标点与 CAM++ 模型。之后无需重复下载。</span>
+        </div>
+        <button class="secondary-button danger-button" id="cancelUpload" type="button" hidden>取消上传</button>
+        <button class="secondary-button" id="leaveProgress" type="button">返回任务列表</button>
+      </div>
+    </section>
+
+    <section id="resultView" class="result-view" hidden>
+      <div class="result-topline">
+        <button class="back-button" id="backButton" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          所有任务
+        </button>
+        <div class="result-actions">
+          <button class="secondary-button compact" id="speakerSettingsButton" type="button" aria-haspopup="dialog" aria-controls="speakerDialog">说话人设置 <span id="speakerButtonCount" class="button-count">0</span></button>
+          <div class="layout-menu">
+            <button class="secondary-button compact" id="pageWidthButton" type="button" aria-expanded="false" aria-controls="pageWidthPanel">页面宽度 <span aria-hidden="true">⌄</span></button>
+            <section id="pageWidthPanel" class="layout-popover" aria-label="页面宽度设置" hidden>
+              <div class="layout-panel-heading"><label for="pageWidth">拖动调整宽度</label><output id="pageWidthValue" for="pageWidth">1240 px</output></div>
+              <input id="pageWidth" type="range" min="960" max="1920" step="1" value="1240" aria-describedby="pageWidthHint">
+              <p id="pageWidthHint">仅调整校对页，首页宽度不变。</p>
+              <div class="layout-panel-footer"><span>本机记住你的选择</span><button id="resetPageWidth" type="button">恢复首页宽度</button></div>
+            </section>
+          </div>
+          <button class="secondary-button compact" id="copyButton" type="button">复制全文</button>
+          <button class="secondary-button compact" id="saveButton" type="button">保存修改</button>
+          <div class="export-menu">
+            <button class="primary-button compact" id="exportButton" type="button">导出 <span>⌄</span></button>
+            <div class="export-popover" id="exportPopover" hidden>
+              <a data-format="srt">SRT <small>通用字幕</small></a>
+              <a data-format="vtt">VTT <small>网页字幕</small></a>
+              <a data-format="txt">TXT <small>时间轴文本</small></a>
+              <a data-format="json">JSON <small>结构化数据</small></a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="result-title-row">
+        <div>
+          <p class="eyebrow">TRANSCRIPT / 本地校对工作台</p>
+          <h1 id="resultFilename">转写结果</h1>
+        </div>
+        <div class="result-stats" id="resultStats"></div>
+      </div>
+
+      <div class="result-notice">
+        <div class="result-save-info">
+          <span class="saved-dot" aria-hidden="true"></span>
+          <span id="editStatus" role="status">结果已自动保存</span>
+          <details class="storage-details"><summary>查看文件位置</summary><div>文字保存在本机<code id="resultPath"></code></div></details>
+        </div>
+        <a class="download-link" id="downloadTxt" data-format="txt" download>下载 TXT 文字 ↓</a>
+      </div>
+      <div class="workspace-grid">
+        <aside class="media-column">
+          <div class="media-card">
+            <div class="media-heading">
+              <div><span class="preview-dot" aria-hidden="true"></span><strong id="mediaLabel">视频预览</strong><span id="mediaResolution"></span></div>
+              <div class="media-actions">
+                <button id="subtitleButton" type="button" aria-expanded="false" aria-controls="subtitlePanel" title="显示转写字幕或导入本机 SRT / VTT">外挂字幕 ⌄</button>
+                <button id="focusVideo" type="button" aria-pressed="false" title="扩大预览区，文字移动到下方">专注视频</button>
+                <button id="fullscreenVideo" type="button" title="全屏查看原视频">⛶ 全屏</button>
+              </div>
+            </div>
+            <div class="media-stage">
+              <div id="mediaMount" class="media-mount"></div>
+              <div id="mediaPlaceholder" class="media-placeholder" aria-hidden="true"><span>▶</span><strong>视频与文字，在此同步</strong><small>点击播放，或选择右侧时间码 · 视频按需读取</small></div>
+            </div>
+            <div class="playback-settings">
+              <label>播放速度 <select id="playbackSpeed"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
+              <label><input id="autoFollow" type="checkbox" checked> 播放时跟随文字</label>
+            </div>
+            <section id="subtitlePanel" class="subtitle-panel" aria-label="外挂字幕设置" hidden>
+              <div class="subtitle-panel-head">
+                <label><input id="subtitleEnabled" type="checkbox"> 显示外挂字幕</label>
+                <span id="subtitleStatus" role="status">未开启</span>
+              </div>
+              <div class="subtitle-source-actions">
+                <button id="useTranscriptSubtitles" type="button">使用当前转写</button>
+                <button id="importSubtitles" type="button">导入 SRT / VTT</button>
+                <input id="subtitleFile" type="file" accept=".srt,.vtt" aria-label="选择本机字幕文件" hidden>
+              </div>
+              <p id="subtitleSource" class="subtitle-source"></p>
+              <div class="subtitle-options">
+                <label><input id="subtitleSpeaker" type="checkbox" checked> 显示说话人<span>（转写字幕）</span></label>
+                <label>时间偏移 <input id="subtitleOffset" type="number" value="0" min="-3600" max="3600" step="0.1" aria-label="字幕时间偏移，正数延后，单位秒"> 秒</label>
+              </div>
+              <p id="subtitleMessage" class="subtitle-message" role="status" hidden></p>
+              <p class="subtitle-help">正数延后，负数提前。仅本机预览，不改写视频；外部字幕最大 5 MB，刷新后需重新导入。</p>
+            </section>
+            <div class="now-playing">
+              <span class="mini-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+              <div>
+                <small>当前播放</small>
+                <p id="nowPlaying">点击任意时间段开始播放</p>
+              </div>
+            </div>
+          </div>
+
+        </aside>
+
+        <section class="transcript-panel">
+          <div class="transcript-tabs" role="tablist" aria-label="文字查看方式">
+            <button id="timelineTab" type="button" role="tab" aria-selected="true" aria-controls="timelinePane">时间轴 · 可编辑</button>
+            <button id="fullTextTab" type="button" role="tab" aria-selected="false" aria-controls="fullTextPane" tabindex="-1">全文阅读</button>
+          </div>
+          <div id="timelinePane" role="tabpanel" aria-labelledby="timelineTab">
+          <div class="transcript-toolbar">
+            <div class="search-box">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m16 16 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              <input id="searchInput" type="search" placeholder="搜索全部转写文字" aria-label="搜索全部转写文字">
+              <kbd id="matchCount" hidden></kbd>
+            </div>
+            <label class="text-size-setting">字号 <select id="textSize" aria-label="文字字号"><option value="15" selected>标准</option><option value="17">大</option><option value="19">更大</option></select></label>
+          </div>
+          <div class="reader-position">
+            <span class="page-info" id="pageInfo"></span>
+            <button id="jumpToPlaying" type="button" title="返回当前播放的文字位置">◎ 定位播放</button>
+          </div>
+          <div id="timelineScroll" class="timeline-scroll" tabindex="0" role="region" aria-label="连续时间轴，上下滚动阅读，支持 PageDown 和 PageUp" aria-describedby="scrollHint">
+            <div id="timeline" class="timeline"></div>
+            <div id="emptySearch" class="empty-search" hidden>没有找到匹配内容，试试其他关键词</div>
+          </div>
+          <div class="reader-footer"><span id="scrollHint">下滑连续阅读 · 文字可直接编辑</span><span id="scrollEnd"></span></div>
+          <div class="reading-track" aria-hidden="true"><span id="readingProgress"></span></div>
+          </div>
+          <div id="fullTextPane" class="full-text-pane" role="tabpanel" aria-labelledby="fullTextTab" hidden>
+            <p>包含时间与说话人，可选中复制。需要修改时，请切换到“时间轴”。</p>
+            <textarea id="fullText" readonly aria-label="完整转写文字" spellcheck="false"></textarea>
+          </div>
+        </section>
+      </div>
+      <dialog id="speakerDialog" class="speaker-dialog" aria-labelledby="speakerDialogTitle" aria-describedby="speakerDialogHelp">
+        <div class="speaker-dialog-heading">
+          <div><p class="eyebrow">SPEAKERS / 发言人管理</p><h2 id="speakerDialogTitle">说话人设置 <span id="speakerCount">0 位</span></h2></div>
+          <button id="closeSpeakerSettings" class="dialog-close" type="button" aria-label="关闭说话人设置" autofocus>×</button>
+        </div>
+        <p id="speakerDialogHelp" class="speaker-dialog-help">修改姓名后，时间轴和转写字幕会即时更新；保存后同步到本地文字与导出字幕。</p>
+        <div id="speakerList" class="speaker-list"></div>
+        <p id="emptySpeakers" class="speaker-dialog-help" hidden>当前结果没有可设置的说话人。</p>
+        <div class="speaker-dialog-footer">
+          <p id="speakerSaveStatus" role="status">关闭窗口会保留本页草稿，不会自动保存。</p>
+          <div><button id="finishSpeakerSettings" class="secondary-button" type="button">完成设置</button><button id="saveSpeakerSettings" class="primary-button compact" type="button">保存修改</button></div>
+        </div>
+      </dialog>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div id="resultLoading" class="loading-banner" role="status" hidden><span class="loading-spinner" aria-hidden="true"></span><span>正在读取转写文字…</span><button id="cancelReading" type="button">取消打开</button></div>
+  <script src="/static/virtual-timeline.js?v=6" defer></script>
+  <script src="/static/subtitles.js?v=5" defer></script>
+  <script src="/static/app.js?v=6" defer></script>
+</body>
+</html>
