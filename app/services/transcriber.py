@@ -222,6 +222,8 @@ class SenseVoiceTranscriber:
             try:
                 self._model = observed_model_class(AutoModel)(
                     load_progress=model_progress,
+                    studio_max_segment_ms=self.settings.max_segment_ms,
+                    studio_merge_length_ms=self.settings.merge_length_s * 1000,
                     model=self.settings.model,
                     vad_model=self.settings.vad_model,
                     vad_kwargs={"max_single_segment_time": self.settings.max_segment_ms},
@@ -262,7 +264,7 @@ class SenseVoiceTranscriber:
                         input=str(audio_path), cache={}, language=language, use_itn=use_itn,
                         batch_size_s=batch_size_s or self.settings.batch_size_s,
                         preset_spk_num=speaker_count if identify_speakers else None,
-                        return_spk_res=identify_speakers, merge_vad=True,
+                        return_spk_res=identify_speakers, merge_vad=False,
                         merge_length_s=self.settings.merge_length_s, sentence_timestamp=True,
                     )
                 finally:

@@ -95,6 +95,7 @@ def test_options_reach_model_and_reset_between_jobs(api_environment, monkeypatch
     assert options["preset_spk_num"] == 2
     assert options["return_spk_res"] is True
     assert options["batch_size_s"] == 15
+    assert options["merge_vad"] is False
     worker.transcribe(api_environment.settings.jobs_dir / "sample.wav", identify_speakers=False)
     options = fake_model.generate.call_args.kwargs
     assert options["use_itn"] is True

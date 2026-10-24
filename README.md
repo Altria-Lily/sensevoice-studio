@@ -180,13 +180,16 @@ Copy-Item .env.example .env
 | `FUNASR_VAD_MODEL` | `fsmn-vad` | 语音活动检测 |
 | `FUNASR_PUNC_MODEL` | `ct-punc` | 标点恢复 |
 | `FUNASR_SPK_MODEL` | `cam++` | 说话人表征与聚类 |
-| `FUNASR_MAX_SEGMENT_MS` | `30000` | 单个 VAD 片段最长毫秒数 |
+| `FUNASR_MAX_SEGMENT_MS` | `30000` | 单个 ASR 语音片段的硬上限（毫秒）；VAD 输出超长时自动切分 |
+| `FUNASR_MERGE_LENGTH_S` | `15` | 相邻语音片段合并的目标长度（秒），受单段硬上限约束 |
 | `FUNASR_BATCH_SIZE_S` | `60` | 推理批大小（秒） |
 | `FUNASR_MAX_UPLOAD_MB` | `10240` | 单文件上传上限，10 × 1024³ 字节 |
 | `FUNASR_JOB_WORKERS` | `1` | 后台并行任务数；GPU 场景建议保持 1 |
 | `FUNASR_DATA_DIR` | `data` | 任务与结果目录 |
 | `FUNASR_MODEL_DIR` | `data/models` | 模型缓存目录 |
 | `FFMPEG_BINARY` | 自动发现 | 可选，自定义 `ffmpeg.exe` 路径 |
+
+只在停顿不超过 200 ms 且合并后不超过目标长度时合并相邻语音片段；更长的非语音间隔保留，不会被补成识别片段。超长语音区间会均匀切分，每段识别输入默认不超过 30 秒，时间轴保留原音轨位置。识别批次大小控制如何组合多个片段，不能代替单段长度上限。模型入口也会检查片段长度，发现超限输入时停止识别，避免直接分配异常大的推理张量。
 
 改完 `.env` 后重启服务。
 
@@ -229,6 +232,8 @@ Copy-Item .env.example .env
 ## 常见问题
 
 ### 显存不足
+
+安全分段可避免长非语音间隔被错误送入模型造成的显存暴涨，但不保证所有音频、批次设置和其他程序占用下都不会 OOM。出现“语音片段超过……秒安全上限”时，表示输入长度保护已阻止异常片段进入模型，请保留任务失败信息排查，不要通过提高上限绕过保护。
 
 RTX 3060 6GB 通常可以运行这条流水线，但长音频或其他占用显存的程序可能导致 OOM。关闭其他 GPU 程序后重试，或在 `.env` 中设置：
 

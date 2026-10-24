@@ -5,6 +5,8 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
+from app.services.segments import safe_vad_segments
+
 DetailsCallback = Callable[[dict[str, Any]], None]
 
 
@@ -71,10 +73,10 @@ class ModelLoadProgress:
 
 
 class RecognitionProgress:
-    """Observe the pinned FunASR VAD/batch pipeline without changing its results.
+    """Observe the safe VAD/batch pipeline used by pinned FunASR.
 
-    VAD's returned list is deliberately retained by reference: FunASR replaces its
-    segment lists when merge_vad runs. The first ASR batch sees those final lists.
+    Retain the adapter's bounded VAD result by reference so the first ASR batch
+    counts the same speech intervals that FunASR consumes.
     Batches are sorted by length, so processed_ms is cumulative work, NOT a cursor
     claiming that the video's first N minutes have all been transcribed.
     """
@@ -171,9 +173,13 @@ class RecognitionProgress:
 def observed_model_class(base):
     """Local adapter for funasr==1.4.14; no vendor files or global monkeypatches."""
     class ObservedAutoModel(base):
-        def __init__(self, *, load_progress: ModelLoadProgress, **kwargs):
+        def __init__(self, *, load_progress: ModelLoadProgress,
+                     studio_max_segment_ms: int | None = None,
+                     studio_merge_length_ms: int = 15000, **kwargs):
             self._studio_load_progress = load_progress
             self._studio_progress = None
+            self._studio_max_segment_ms = studio_max_segment_ms
+            self._studio_merge_length_ms = studio_merge_length_ms
             try:
                 super().__init__(**kwargs)
             finally:
@@ -186,7 +192,7 @@ def observed_model_class(base):
 
         def inference(self, input, input_len=None, model=None, kwargs=None, key=None,
                       progress_callback=None, **cfg):
-            invoke = super().inference
+            invoke = self._bounded_inference
             if self._studio_progress is None:
                 return invoke(input, input_len=input_len, model=model, kwargs=kwargs,
                               key=key, progress_callback=progress_callback, **cfg)
@@ -194,5 +200,30 @@ def observed_model_class(base):
                 self, invoke, input, input_len=input_len, model=model, kwargs=kwargs,
                 key=key, progress_callback=progress_callback, **cfg,
             )
+
+        def _bounded_inference(self, input, input_len=None, model=None, kwargs=None,
+                               key=None, progress_callback=None, **cfg):
+            selected = self.model if model is None else model
+            limit = self._studio_max_segment_ms
+            # FunASR slices 16 kHz audio using exactly 16 samples per millisecond.
+            # Reject a bad input before allocating neural-model activations.
+            if (
+                limit is not None and selected is self.model and isinstance(input, (list, tuple))
+                and any(len(part) > limit * 16 for part in input)
+            ):
+                raise ValueError(f"语音片段超过 {limit / 1000:g} 秒安全上限，已停止识别以防止内存溢出")
+            result = super().inference(
+                input, input_len=input_len, model=model, kwargs=kwargs, key=key,
+                progress_callback=progress_callback, **cfg,
+            )
+            if limit is not None and selected is self.vad_model:
+                result = [
+                    {**item, "value": safe_vad_segments(
+                        item.get("value", []), max_segment_ms=limit,
+                        merge_length_ms=self._studio_merge_length_ms,
+                    )}
+                    for item in result
+                ]
+            return result
 
     return ObservedAutoModel
